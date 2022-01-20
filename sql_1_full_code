@@ -1,0 +1,318 @@
+------------------------------------------------
+-- Table: receipts
+------------------------------------------------
+-- Create Table receipts and import receipts.json
+CREATE TABLE receipts (values json);
+GRANT SELECT ON receipts TO PUBLIC;
+COPY receipts from 'C:\Users\joszp\Documents\Fetch\receipts.json';
+
+-- Error found on line 431. Unexpected "" Inside "description" key and its value pair.
+--  "description":"522 9" PLATE"  (has extra " after the 9)
+DROP TABLE receipts;
+
+-- Create Table receipts in order to store receipts.json as text type
+CREATE TABLE receipts (values text);
+GRANT SELECT ON receipts TO PUBLIC;
+COPY receipts from 'C:\Users\joszp\Documents\Fetch\receipts.json';
+
+-- Verify table
+SELECT * FROM receipts
+FETCH FIRST 431 ROWS ONLY;
+
+-- UPDATE receipts and replace values for error 
+UPDATE receipts SET values = REGEXP_REPLACE(values, ' 9" PLATE', ' 9 PLATE', 'g');
+
+-- Convert brands type to JSON and manipulate as JSON
+ALTER TABLE receipts
+ALTER COLUMN values type json USING "values"::json;
+
+-- Error found. Unexpected "" Inside "description" key and its value pair.
+--  :"Black and White Easter Bunny 16 1/2" tall  (has extra " after the 1/2)
+
+-- UPDATE receipts and replace values for error 
+UPDATE receipts SET values = REGEXP_REPLACE(values, ' 1/2" tall', ' 1/2 tall', 'g');
+
+-- Convert brands type to JSON and manipulate as JSON
+ALTER TABLE receipts
+ALTER COLUMN values type json USING "values"::json;
+
+-- Verify table
+SELECT * FROM receipts
+
+
+	-- Inspect JSON file and extract values to a new table
+-- Extract all keys
+SELECT DISTINCT(json_object_keys(values)) FROM receipts;		-- 15 keys
+-- "_id", "userId", "pointsEarned", "bonusPointsEarned", "purchaseDate" "modifyDate" "pointsAwardedDate" "dateScanned" "bonusPointsEarnedReason"
+-- "rewardsReceiptStatus", "finishedDate" "rewardsReceiptItemList" "createDate" "totalSpent" "purchasedItemCount"
+
+
+-- Identify the path for each feature
+SELECT values FROM receipts;
+SELECT values->'_id' FROM receipts;
+SELECT values::json#>>'{_id,$oid}' FROM receipts; -- _id
+SELECT values->>'userId' FROM receipts -- userId
+SELECT values->>'pointsEarned' FROM receipts -- pointsEarned
+SELECT values->>'bonusPointsEarned' FROM receipts -- bonusPointsEarned
+SELECT values->>'purchaseDate' FROM receipts
+SELECT values::json#>>'{purchaseDate,$date}' FROM receipts -- purchaseDate
+SELECT values::json#>>'{modifyDate,$date}' FROM receipts -- modifyDate
+SELECT values->>'pointsAwardedDate' FROM receipts
+SELECT values::json#>>'{pointsAwardedDate,$date}' FROM receipts -- pointsAwardedDate
+SELECT values->>'dateScanned' FROM receipts
+SELECT values::json#>>'{dateScanned,$date}' FROM receipts -- dateScanned
+SELECT values->>'bonusPointsEarnedReason' FROM receipts -- bonusPointsEarnedReason
+SELECT values->>'rewardsReceiptStatus' FROM receipts -- rewardsReceiptStatus
+SELECT values->>'finishedDate' FROM receipts
+SELECT values::json#>>'{finishedDate,$date}' FROM receipts -- finishedDate
+SELECT values->>'rewardsReceiptItemList' FROM receipts
+SELECT values::json#>>'{rewardsReceiptItemList}' FROM receipts -- embedded JSON file as text.
+-- SELECT CAST(values::json#>>'{rewardsReceiptItemList}' AS json) FROM receipts -- rewardsReceiptItemList converted from text to json
+SELECT values->>'createDate' FROM receipts
+SELECT values::json#>>'{createDate,$date}' FROM receipts -- createDate
+SELECT values->>'totalSpent' FROM receipts -- totalSpent
+SELECT values->>'purchasedItemCount' FROM receipts -- purchasedItemCount
+
+
+-- "_id", "userId", "pointsEarned", "bonusPointsEarned", "purchaseDate" "modifyDate" "pointsAwardedDate" "dateScanned" "bonusPointsEarnedReason"
+-- "rewardsReceiptStatus", "finishedDate" "rewardsReceiptItemList" "createDate" "totalSpent" "purchasedItemCount"
+
+-- Create table to store JSON parsed values
+CREATE TABLE receipts_parsed (
+	index SERIAL,
+	id VARCHAR,
+	user_id VARCHAR,
+	points_earned DECIMAL, 
+	bonus_points_earned INT,
+	purchase_date BIGINT,
+	modify_date BIGINT,
+	points_awarded_date BIGINT,
+	date_scanned BIGINT,
+	bonus_points_reason VARCHAR, 
+	rewards_receipt_status VARCHAR,
+	finished_date BIGINT,
+	rewards_receipt_item_list JSON,
+	create_date BIGINT,
+	total_spent DECIMAL,
+	purchased_items_count INT);
+
+-- Verify Table
+SELECT * FROM receipts_parsed;
+DROP TABLE receipts_parsed;
+
+
+-- Extract data from receipts into receipts_parsed
+INSERT INTO receipts_parsed(id, user_id, points_earned, bonus_points_earned, purchase_date, modify_date, points_awarded_date, date_scanned,
+						   bonus_points_reason, rewards_receipt_status, finished_date, rewards_receipt_item_list, create_date, total_spent, purchased_items_count)
+SELECT values::json#>>'{_id,$oid}', values->>'userId', CAST(values->>'pointsEarned' AS DEC), CAST(values->>'bonusPointsEarned' AS INT), 
+	CAST(values::json#>>'{purchaseDate,$date}' AS BIGINT), CAST(values::json#>>'{modifyDate,$date}' AS BIGINT), CAST(values::json#>>'{pointsAwardedDate,$date}' AS BIGINT),
+	CAST(values::json#>>'{dateScanned,$date}' AS BIGINT), values->>'bonusPointsEarnedReason', values->>'rewardsReceiptStatus', CAST(values::json#>>'{finishedDate,$date}' AS BIGINT),
+	CAST(values::json#>>'{rewardsReceiptItemList}' AS json), CAST(values::json#>>'{createDate,$date}' AS BIGINT), CAST(values->>'totalSpent' AS DEC), CAST(values->>'purchasedItemCount' AS INT)
+FROM receipts;
+
+
+-- Verify Table
+SELECT * FROM receipts_parsed;
+
+-- Convert dates from UNIX EPOCH TO DATE
+SELECT purchase_date FROM receipts_parsed -- Inspect data type. Unich epox
+
+SELECT to_timestamp(cast(receipts_parsed.purchase_date/1000 as bigint)) as test FROM receipts_parsed -- expression to change to timestamp
+
+-- Alter table expression to change column data type and add expression for date/time conversion
+ALTER TABLE receipts_parsed
+ALTER COLUMN purchase_date TYPE timestamp USING to_timestamp(cast(receipts_parsed.purchase_date/1000 as bigint));
+
+-- Verify Table
+SELECT * FROM receipts_parsed;
+
+-- Alter the rest of the columns to timestamp
+ALTER TABLE receipts_parsed
+ALTER COLUMN modify_date TYPE timestamp USING to_timestamp(cast(receipts_parsed.modify_date/1000 as bigint));
+
+ALTER TABLE receipts_parsed
+ALTER COLUMN points_awarded_date TYPE timestamp USING to_timestamp(cast(receipts_parsed.points_awarded_date/1000 as bigint));
+
+ALTER TABLE receipts_parsed
+ALTER COLUMN date_scanned TYPE timestamp USING to_timestamp(cast(receipts_parsed.date_scanned/1000 as bigint));
+
+ALTER TABLE receipts_parsed
+ALTER COLUMN finished_date TYPE timestamp USING to_timestamp(cast(receipts_parsed.finished_date/1000 as bigint));
+
+ALTER TABLE receipts_parsed
+ALTER COLUMN create_date TYPE timestamp USING to_timestamp(cast(receipts_parsed.create_date/1000 as bigint));
+
+-- Verify Table
+SELECT * FROM receipts_parsed;
+
+
+
+------------------------------------------------
+-- Table: brands
+------------------------------------------------
+-- Create Table brands and import brands.json
+CREATE TABLE brands (values json);
+GRANT SELECT ON brands TO PUBLIC;
+COPY brands from 'C:\Users\joszp\Documents\Fetch\brands.json';
+
+-- Error found on line 750. Unexpected "" Inside "name" key and its value pair.
+-- General Mills \"Big G\" Cereal"
+DROP TABLE brands;
+
+-- Create Table brands in order to store brands.json as text type
+CREATE TABLE brands (values text);
+GRANT SELECT ON brands TO PUBLIC;
+COPY brands from 'C:\Users\joszp\Documents\Fetch\brands.json';
+
+-- Verify table
+SELECT * FROM brands;
+
+-- Inspect row raising error
+SELECT * FROM brands WHERE values LIKE '%Big G%';
+
+-- Update brands table and replace improper "" using LIKE and Wildcards
+UPDATE brands SET values = '{"_id":{"$oid":"5dc07e2aa60b873d6b0666d1"},"name":"General Mills Big G Cereal","cpg":{"$ref":"Cogs","$id":{"$oid":"53e10d6368abd3c7065097cc"}},"barcode":"511111006305","brandCode":"GENERAL MILLS CEREAL"}' 
+WHERE values LIKE '%Big G%';
+
+-- Verify row raising error is corrected
+SELECT * FROM brands WHERE values LIKE '%Big G%';
+
+-- Convert brands type to JSON and manipulate as JSON
+ALTER TABLE brands
+ALTER COLUMN values type json USING "values"::json;
+
+-- Verify table
+SELECT * FROM brands;
+
+	-- Inspect JSON file and extract values to a new table
+-- Extract all keys
+SELECT DISTINCT(json_object_keys(values)) FROM brands;		-- 8
+
+-- Create table to store JSON parsed values
+CREATE TABLE brands_parsed (
+	index SERIAL,
+	id VARCHAR,
+	barcode BIGINT,
+	category VARCHAR,
+	category_code VARCHAR, 
+	cpg VARCHAR, 
+	name VARCHAR,
+	brand_code VARCHAR,
+	top_brand BOOLEAN
+);
+
+-- Verify Table
+SELECT * FROM brands_parsed;
+DROP TABLE brands_parsed;
+
+-- Identify the path for each feature
+SELECT values FROM brands;
+SELECT values->'_id' FROM brands;
+SELECT values::json#>>'{_id,$oid}' FROM brands; --id
+SELECT values->'barcode' FROM brands; 
+SELECT values->>'barcode' FROM brands;
+SELECT values::json#>'{barcode}' FROM brands;   -- barcode
+SELECT values->'category' FROM brands;	-- category
+SELECT values->'categoryCode' FROM brands;	 
+SELECT values::json#>'{cpg,$id,$oid}' FROM brands; -- categoryCode
+SELECT values->'name' FROM brands; -- name
+SELECT values->'brandCode' FROM brands; -- brandCode
+SELECT values->'topBrand' FROM brands; -- topBrand
+
+-- Extract data from brands.values json into brands_parsed
+INSERT INTO brands_parsed(id, barcode, category, category_code, cpg, name, brand_code, top_brand)
+SELECT values::json#>>'{_id,$oid}', CAST(values->>'barcode' AS BIGINT), values->>'category', values->>'categoryCode', 
+	values::json#>>'{cpg,$id,$oid}', values->>'name', values->>'brandCode', CAST(values->>'topBrand' AS BOOLEAN)
+FROM brands;
+
+
+-- Clean text from name column
+UPDATE brands_parsed SET name = TRIM(LEADING 'test brand @' FROM name)
+WHERE name LIKE '%test brand @%';
+
+-- Clean text from brand_code column
+UPDATE brands_parsed SET brand_code = TRIM(LEADING 'TEST BRANDCODE @' FROM brand_code)
+WHERE brand_code LIKE '%TEST BRANDCODE @%';
+
+-- Verify Table
+SELECT * FROM brands_parsed ORDER BY index;
+
+
+
+
+------------------------------------------------
+-- Table: users
+------------------------------------------------
+-- Create Table users and import users.json
+CREATE TABLE users (values json);
+GRANT SELECT ON users TO PUBLIC;
+COPY users from 'C:\Users\joszp\Documents\Fetch\users.json';
+
+-- Verify table
+SELECT * FROM users
+
+	-- Inspect JSON file and extract values to a new table
+-- Extract all keys
+SELECT DISTINCT(json_object_keys(values)) FROM users;		-- 7 keys
+-- "_id", "createdDate", "state", "signUpSource", "role", "lastLogin", "active"
+
+-- Identify the path for each feature
+SELECT values FROM users;
+SELECT values->>'_id' FROM users;
+SELECT values::json#>>'{_id,$oid}' FROM users; -- _id
+SELECT values->>'createdDate' FROM users;
+SELECT values::json#>>'{createdDate,$date}' FROM users; -- createdDate
+SELECT values->>'state' FROM users; -- state
+SELECT values->>'signUpSource' FROM users; -- signUpSource
+SELECT values->>'role' FROM users; -- role
+SELECT values->>'lastLogin' FROM users;
+SELECT values::json#>>'{lastLogin,$date}' FROM users; -- lastLogin
+SELECT values->>'active' FROM users; -- active
+
+-- Create table to store JSON parsed values
+CREATE TABLE users_parsed (
+	index SERIAL,
+	user_id VARCHAR,
+	created_date BIGINT, 
+	state VARCHAR,
+	sign_up_source VARCHAR,
+	role VARCHAR,
+	last_login BIGINT,
+	active BOOLEAN);
+
+-- Verify table
+SELECT * FROM users_parsed
+DROP TABLE users_parsed
+
+-- Extract data from users into users_parsed
+INSERT INTO users_parsed(user_id, created_date, state, sign_up_source, role, last_login, active)
+SELECT DISTINCT(values::json#>>'{_id,$oid}'), CAST(values::json#>>'{createdDate,$date}' AS BIGINT), values->>'state', values->>'signUpSource',
+	values->>'role', CAST(values::json#>>'{lastLogin,$date}' AS BIGINT), CAST(values->>'active' AS BOOLEAN)
+FROM users;
+
+-- Verify table
+SELECT * FROM users_parsed
+	
+
+-- Alter tables expression to change column data type and add expression for date/time conversion
+ALTER TABLE users_parsed
+ALTER COLUMN created_date TYPE timestamp USING to_timestamp(cast(users_parsed.created_date/1000 as bigint));
+
+ALTER TABLE users_parsed
+ALTER COLUMN last_login TYPE timestamp USING to_timestamp(cast(users_parsed.last_login/1000 as bigint));
+	
+-- Verify table
+SELECT * FROM receipts_parsed
+
+
+--------------
+-- Add Keys
+--------------
+ALTER TABLE brands_parsed ADD PRIMARY KEY(id);
+
+
+ALTER TABLE receipts_parsed ADD PRIMARY KEY(id);
+ALTER TABLE receipts_parsed ADD FOREIGN KEY(user_id)
+REFERENCES users_parsed(user_id);
+
+ALTER TABLE users_parsed ADD PRIMARY KEY(user_id);
